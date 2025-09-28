@@ -175,7 +175,7 @@ function showUsage() {
             },
             "3. Jadwal Sholat (Default)": {
                 "url": "/jadwal",
-                "deskripsi": "Menampilkan jadwal sholat untuk lokasi default (ID: 1208 - Bandung)."
+                "deskripsi": "Menampilkan jadwal sholat untuk lokasi default (ID: 1208 - Garut)."
             }
         }
     };
