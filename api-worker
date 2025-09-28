@@ -1,0 +1,185 @@
+export default {
+  /**
+   * Titik masuk utama untuk Worker.
+   */
+  async fetch(request) {
+    const url = new URL(request.url);
+    const pathParts = url.pathname.split('/').filter(p => p); 
+
+    const route = pathParts[0];
+
+    if (route === 'cari' && pathParts[1]) {
+      const cityName = pathParts[1];
+      return await handleCitySearch(cityName);
+    } else if (route === 'jadwal') {
+      const cityId = pathParts[1] || '1208';
+      return await handlePrayerSchedule(cityId);
+    } else {
+      return showUsage();
+    }
+  },
+};
+
+// ===== FUNGSI BARU UNTUK KONVERSI ANGKA =====
+/**
+ * Mengonversi string angka Latin (0-9) menjadi angka Arab Timur (٠-٩).
+ * @param {string | number} number - Angka yang akan dikonversi.
+ * @returns {string} String angka dalam format Arab Timur.
+ */
+function toEasternArabicNumerals(number) {
+  // Intl.NumberFormat adalah cara modern di JavaScript untuk lokalisasi angka.
+  // Locale 'ar-EG' (Arab-Mesir) menggunakan angka Arab Timur.
+  return new Intl.NumberFormat('ar-EG', { useGrouping: false }).format(parseInt(number, 10));
+}
+// ===========================================
+
+/**
+ * Menangani permintaan untuk mencari ID kota.
+ */
+async function handleCitySearch(cityName) {
+  // ... (Fungsi ini tidak ada perubahan)
+  const searchUrl = `https://api.myquran.com/v2/sholat/kota/cari/${encodeURIComponent(cityName)}`;
+  try {
+    const response = await fetch(searchUrl);
+    const data = await response.json();
+    
+    if (!data.status) {
+        return new Response(JSON.stringify({ status: false, message: 'Kota tidak ditemukan atau terjadi kesalahan input.' }), {
+            status: 404,
+            headers: { 'Content-Type': 'application/json' },
+        });
+    }
+
+    return new Response(JSON.stringify(data, null, 2), {
+      headers: { 'Content-Type': 'application/json' },
+    });
+  } catch (error) {
+    return new Response(JSON.stringify({ status: false, message: 'Gagal menghubungi API pencarian kota.' }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+}
+
+/**
+ * Menangani permintaan untuk mendapatkan jadwal sholat dan memformatnya.
+ */
+async function handlePrayerSchedule(cityId) {
+  const today = new Date();
+  const year = today.getFullYear();
+  const month = String(today.getMonth() + 1).padStart(2, '0');
+  const day = String(today.getDate()).padStart(2, '0');
+  
+  const prayerTimesAPI = `https://api.myquran.com/v2/sholat/jadwal/${cityId}/${year}/${month}/${day}`;
+  
+  try {
+    const [prayerResponse, hijriResponse] = await Promise.all([
+      fetch(prayerTimesAPI),
+      fetch(`https://api.aladhan.com/v1/gToH?date=${day}-${month}-${year}`)
+    ]);
+
+    const prayerData = await prayerResponse.json();
+    const hijriApiData = await hijriResponse.json();
+
+    if (!prayerData.status) {
+      return new Response(JSON.stringify(prayerData, null, 2), {
+        status: 404,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    const data = prayerData.data;
+    const scheduleData = data.jadwal;
+    
+    let formattedHijri = scheduleData.hijriah; // Fallback jika API Hijriah gagal
+
+    // ===== LOGIKA PEMFORMATAN BARU =====
+    if (hijriApiData.code === 200) {
+        const hijriInfo = hijriApiData.data.hijri;
+
+        // 1. Ambil komponen tanggal
+        const dayWestern = hijriInfo.day;
+        const monthArabic = hijriInfo.month.ar; // Ambil nama bulan Arab
+        const yearWestern = hijriInfo.year;
+
+        // 2. Konversi angka hari dan tahun ke angka Arab
+        const dayArabic = toEasternArabicNumerals(dayWestern);
+        const yearArabic = toEasternArabicNumerals(yearWestern);
+
+        // 3. Susun string akhir dengan format Arab (هـ adalah singkatan untuk Hijriah)
+        formattedHijri = `${dayArabic} ${monthArabic} ${yearArabic} هـ`;
+    }
+    // ====================================
+
+    const audioUrls = {
+      maghrib: 'https://cdn.jsdelivr.net/gh/chkdua/adzan-audio/maghrib.mp3',
+      isya: 'https://cdn.jsdelivr.net/gh/chkdua/adzan-audio/isya.mp3',
+      imsak: 'https://cdn.jsdelivr.net/gh/chkdua/adzan-audio/imsak.mp3',
+      shubuh: 'https://cdn.jsdelivr.net/gh/chkdua/adzan-audio/shubuh.mp3',
+      fajar: 'https://cdn.jsdelivr.net/gh/chkdua/adzan-audio/fajar.mp3',
+      dhuha: 'https://cdn.jsdelivr.net/gh/chkdua/adzan-audio/dhuha.mp3',
+      dzuhur: 'https://cdn.jsdelivr.net/gh/chkdua/adzan-audio/dzuhur.mp3',
+      ashar: 'https://cdn.jsdelivr.net/gh/chkdua/adzan-audio/imsak.mp3',
+    };
+
+    const jsonResponse = {
+      title: 'JADWAL SHOLAT',
+      id: data.id,
+      lokasi: data.lokasi,
+      daerah: data.daerah,
+      tanggal: scheduleData.tanggal,
+      hijri: formattedHijri, // Gunakan format Arab yang baru
+      jadwal: {
+        maghrib: { waktu: scheduleData.maghrib, audio: audioUrls.maghrib },
+        isya: { waktu: scheduleData.isya, audio: audioUrls.isya },
+        imsak: { waktu: scheduleData.imsak, audio: audioUrls.imsak },
+        shubuh: { waktu: scheduleData.subuh, audio: audioUrls.shubuh },
+        fajar: { waktu: scheduleData.terbit, audio: audioUrls.fajar },
+        dhuha: { waktu: scheduleData.dhuha, audio: audioUrls.dhuha },
+        dzuhur: { waktu: scheduleData.dzuhur, audio: audioUrls.dzuhur },
+        ashar: { waktu: scheduleData.ashar, audio: audioUrls.ashar },
+      },
+    };
+
+    return new Response(JSON.stringify(jsonResponse, null, 2), {
+      headers: { 'Content-Type': 'application/json' },
+    });
+
+  } catch (error) {
+    console.error('Error in handlePrayerSchedule:', error);
+    return new Response(JSON.stringify({ status: false, message: 'Gagal memproses permintaan jadwal sholat.' }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+}
+
+/**
+ * Menampilkan pesan petunjuk penggunaan API.
+ */
+function showUsage() {
+    // ... (Fungsi ini tidak ada perubahan)
+    const usage = {
+        message: "Selamat Datang di API Jadwal Sholat",
+        deskripsi: "API ini menyediakan jadwal sholat dinamis berdasarkan lokasi di Indonesia.",
+        endpoints: {
+            "1. Cari Kota": {
+                "url": "/cari/{nama-kota}",
+                "deskripsi": "Untuk mendapatkan ID kota yang akan digunakan di endpoint jadwal.",
+                "contoh": "/cari/surabaya"
+            },
+            "2. Jadwal Sholat (Spesifik)": {
+                "url": "/jadwal/{id-kota}",
+                "deskripsi": "Menampilkan jadwal sholat untuk kota dengan ID spesifik.",
+                "contoh": "/jadwal/1609"
+            },
+            "3. Jadwal Sholat (Default)": {
+                "url": "/jadwal",
+                "deskripsi": "Menampilkan jadwal sholat untuk lokasi default (ID: 1208 - Bandung)."
+            }
+        }
+    };
+    return new Response(JSON.stringify(usage, null, 2), {
+        headers: { 'Content-Type': 'application/json' },
+    });
+}
