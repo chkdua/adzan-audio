@@ -20,43 +20,35 @@ export default {
   },
 };
 
-// ===== FUNGSI BARU UNTUK KONVERSI ANGKA =====
 /**
  * Mengonversi string angka Latin (0-9) menjadi angka Arab Timur (٠-٩).
  * @param {string | number} number - Angka yang akan dikonversi.
- * @returns {string} String angka dalam format Arab Timur.
+ * @returns {string} String angka dalam format Arab Timur tanpa pemisah ribuan.
  */
 function toEasternArabicNumerals(number) {
-  // Intl.NumberFormat adalah cara modern di JavaScript untuk lokalisasi angka.
-  // Locale 'ar-EG' (Arab-Mesir) menggunakan angka Arab Timur.
-  return new Intl.NumberFormat('ar-EG', { useGrouping: false }).format(parseInt(number, 10));
+  const options = { useGrouping: false };
+  return new Intl.NumberFormat('ar-EG', options).format(parseInt(number, 10));
 }
-// ===========================================
 
 /**
  * Menangani permintaan untuk mencari ID kota.
  */
 async function handleCitySearch(cityName) {
-  // ... (Fungsi ini tidak ada perubahan)
   const searchUrl = `https://api.myquran.com/v2/sholat/kota/cari/${encodeURIComponent(cityName)}`;
   try {
     const response = await fetch(searchUrl);
     const data = await response.json();
-    
     if (!data.status) {
-        return new Response(JSON.stringify({ status: false, message: 'Kota tidak ditemukan atau terjadi kesalahan input.' }), {
-            status: 404,
-            headers: { 'Content-Type': 'application/json' },
+        return new Response(JSON.stringify({ status: false, message: 'Kota tidak ditemukan.' }), {
+            status: 404, headers: { 'Content-Type': 'application/json' },
         });
     }
-
     return new Response(JSON.stringify(data, null, 2), {
       headers: { 'Content-Type': 'application/json' },
     });
   } catch (error) {
-    return new Response(JSON.stringify({ status: false, message: 'Gagal menghubungi API pencarian kota.' }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' },
+    return new Response(JSON.stringify({ status: false, message: 'Gagal menghubungi API.' }), {
+      status: 500, headers: { 'Content-Type': 'application/json' },
     });
   }
 }
@@ -71,46 +63,43 @@ async function handlePrayerSchedule(cityId) {
   const day = String(today.getDate()).padStart(2, '0');
   
   const prayerTimesAPI = `https://api.myquran.com/v2/sholat/jadwal/${cityId}/${year}/${month}/${day}`;
+  const hijriArabicAPI = `https://api.aladhan.com/v1/gToH?date=${day}-${month}-${year}`;
+  const hijriIndoAPI = `https://api.myquran.com/v2/cal/hijr/?adj=-1`;
   
   try {
-    const [prayerResponse, hijriResponse] = await Promise.all([
+    const [prayerResponse, hijriArResponse, hijriIdResponse] = await Promise.all([
       fetch(prayerTimesAPI),
-      fetch(`https://api.aladhan.com/v1/gToH?date=${day}-${month}-${year}`)
+      fetch(hijriArabicAPI),
+      fetch(hijriIndoAPI)
     ]);
 
     const prayerData = await prayerResponse.json();
-    const hijriApiData = await hijriResponse.json();
+    const hijriArApiData = await hijriArResponse.json();
+    const hijriIdApiData = await hijriIdResponse.json();
 
     if (!prayerData.status) {
       return new Response(JSON.stringify(prayerData, null, 2), {
-        status: 404,
-        headers: { 'Content-Type': 'application/json' },
+        status: 404, headers: { 'Content-Type': 'application/json' },
       });
     }
 
     const data = prayerData.data;
     const scheduleData = data.jadwal;
     
-    let formattedHijri = scheduleData.hijriah; // Fallback jika API Hijriah gagal
+    let hijriAr = '';
+    let hijriId = scheduleData.hijriah;
 
-    // ===== LOGIKA PEMFORMATAN BARU =====
-    if (hijriApiData.code === 200) {
-        const hijriInfo = hijriApiData.data.hijri;
-
-        // 1. Ambil komponen tanggal
-        const dayWestern = hijriInfo.day;
-        const monthArabic = hijriInfo.month.ar; // Ambil nama bulan Arab
-        const yearWestern = hijriInfo.year;
-
-        // 2. Konversi angka hari dan tahun ke angka Arab
-        const dayArabic = toEasternArabicNumerals(dayWestern);
-        const yearArabic = toEasternArabicNumerals(yearWestern);
-
-        // 3. Susun string akhir dengan format Arab (هـ adalah singkatan untuk Hijriah)
-        formattedHijri = `${dayArabic} ${monthArabic} ${yearArabic} هـ`;
+    if (hijriArApiData.code === 200) {
+        const hijriInfo = hijriArApiData.data.hijri;
+        const dayArabic = toEasternArabicNumerals(hijriInfo.day);
+        const yearArabic = toEasternArabicNumerals(hijriInfo.year);
+        hijriAr = `${dayArabic} ${hijriInfo.month.ar} ${yearArabic} هـ`;
     }
-    // ====================================
 
+    if (hijriIdApiData.status && hijriIdApiData.data && hijriIdApiData.data.date && hijriIdApiData.data.date.length > 1) {
+        hijriId = hijriIdApiData.data.date[1];
+    }
+	
     const audioUrls = {
       maghrib: 'https://cdn.jsdelivr.net/gh/chkdua/adzan-audio/maghrib.mp3',
       isya: 'https://cdn.jsdelivr.net/gh/chkdua/adzan-audio/isya.mp3',
@@ -119,7 +108,7 @@ async function handlePrayerSchedule(cityId) {
       fajar: 'https://cdn.jsdelivr.net/gh/chkdua/adzan-audio/fajar.mp3',
       dhuha: 'https://cdn.jsdelivr.net/gh/chkdua/adzan-audio/dhuha.mp3',
       dzuhur: 'https://cdn.jsdelivr.net/gh/chkdua/adzan-audio/dzuhur.mp3',
-      ashar: 'https://cdn.jsdelivr.net/gh/chkdua/adzan-audio/imsak.mp3',
+      ashar: 'https://cdn.jsdelivr.net/gh/chkdua/adzan-audio/ashar.mp3',
     };
 
     const jsonResponse = {
@@ -128,7 +117,10 @@ async function handlePrayerSchedule(cityId) {
       lokasi: data.lokasi,
       daerah: data.daerah,
       tanggal: scheduleData.tanggal,
-      hijri: formattedHijri, // Gunakan format Arab yang baru
+      hijri: {
+        ar: hijriAr,
+        id: hijriId,
+      },
       jadwal: {
         maghrib: { waktu: scheduleData.maghrib, audio: audioUrls.maghrib },
         isya: { waktu: scheduleData.isya, audio: audioUrls.isya },
@@ -147,9 +139,8 @@ async function handlePrayerSchedule(cityId) {
 
   } catch (error) {
     console.error('Error in handlePrayerSchedule:', error);
-    return new Response(JSON.stringify({ status: false, message: 'Gagal memproses permintaan jadwal sholat.' }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' },
+    return new Response(JSON.stringify({ status: false, message: 'Gagal memproses permintaan.' }), {
+      status: 500, headers: { 'Content-Type': 'application/json' },
     });
   }
 }
@@ -158,7 +149,6 @@ async function handlePrayerSchedule(cityId) {
  * Menampilkan pesan petunjuk penggunaan API.
  */
 function showUsage() {
-    // ... (Fungsi ini tidak ada perubahan)
     const usage = {
         message: "Selamat Datang di API Jadwal Sholat",
         deskripsi: "API ini menyediakan jadwal sholat dinamis berdasarkan lokasi di Indonesia.",
