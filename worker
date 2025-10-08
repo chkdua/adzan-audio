@@ -16,6 +16,7 @@ export default {
     }
   },
 };
+
 async function handleCitySearch(cityName) {
   const searchUrl = `https://api.myquran.com/v2/sholat/kota/cari/${encodeURIComponent(cityName)}`;
   try {
@@ -35,6 +36,7 @@ async function handleCitySearch(cityName) {
     });
   }
 }
+
 async function handlePrayerSchedule(cityId) {
   const today = new Date();
   const year = today.getFullYear();
@@ -60,9 +62,10 @@ async function handlePrayerSchedule(cityId) {
     if (hijriIdApiData.status && hijriIdApiData.data?.date?.length > 1) {
         hijriId = hijriIdApiData.data.date[1];
     }
+
     const jsonResponse = {
+      id: data.id, // ID sekarang ada di paling atas
       title: 'JADWAL SHOLAT',
-      id: data.id,
       lokasi: data.lokasi,
       daerah: data.daerah,
       tanggal: scheduleData.tanggal,
@@ -88,6 +91,7 @@ async function handlePrayerSchedule(cityId) {
         ashar: 'https://cdn.jsdelivr.net/gh/chkdua/adzan-audio/ashar.mp3',
       },
     };
+
     return new Response(JSON.stringify(jsonResponse, null, 2), {
       headers: { 'Content-Type': 'application/json; charset=utf-8' },
     });
@@ -98,6 +102,7 @@ async function handlePrayerSchedule(cityId) {
     });
   }
 }
+
 function showUsage() {
   const usageData = {
     message: "Selamat datang di API Jadwal Sholat",
