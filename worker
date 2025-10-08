@@ -1,115 +1,72 @@
 export default {
-  /**
-   * Titik masuk utama untuk Worker.
-   */
   async fetch(request) {
     const url = new URL(request.url);
     const pathParts = url.pathname.split('/').filter(p => p); 
-
     const route = pathParts[0];
-
     if (route === 'cari' && pathParts[1]) {
       const cityName = pathParts[1];
       return await handleCitySearch(cityName);
-    } else if (route === 'jadwal') {
+    }
+    else if (route === 'jadwal') {
       const cityId = pathParts[1] || '1208';
       return await handlePrayerSchedule(cityId);
-    } else {
+    } 
+    else {
       return showUsage();
     }
   },
 };
-
-/**
- * Mengonversi string angka Latin (0-9) menjadi angka Arab Timur (٠-٩).
- * @param {string | number} number - Angka yang akan dikonversi.
- * @returns {string} String angka dalam format Arab Timur tanpa pemisah ribuan.
- */
-function toEasternArabicNumerals(number) {
-  const options = { useGrouping: false };
-  return new Intl.NumberFormat('ar-EG', options).format(parseInt(number, 10));
-}
-
-/**
- * Menangani permintaan untuk mencari ID kota.
- */
 async function handleCitySearch(cityName) {
   const searchUrl = `https://api.myquran.com/v2/sholat/kota/cari/${encodeURIComponent(cityName)}`;
   try {
     const response = await fetch(searchUrl);
     const data = await response.json();
-    if (!data.status) {
+    if (!data.status || data.data.length === 0) {
         return new Response(JSON.stringify({ status: false, message: 'Kota tidak ditemukan.' }), {
-            status: 404, headers: { 'Content-Type': 'application/json' },
+            status: 404, headers: { 'Content-Type': 'application/json; charset=utf-8' },
         });
     }
     return new Response(JSON.stringify(data, null, 2), {
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json; charset=utf-8' },
     });
   } catch (error) {
-    return new Response(JSON.stringify({ status: false, message: 'Gagal menghubungi API.' }), {
-      status: 500, headers: { 'Content-Type': 'application/json' },
+    return new Response(JSON.stringify({ status: false, message: 'Gagal menghubungi API pencarian kota.' }), {
+      status: 500, headers: { 'Content-Type': 'application/json; charset=utf-8' },
     });
   }
 }
-
-/**
- * Menangani permintaan untuk mendapatkan jadwal sholat dan memformatnya.
- */
 async function handlePrayerSchedule(cityId) {
   const today = new Date();
   const year = today.getFullYear();
   const month = String(today.getMonth() + 1).padStart(2, '0');
   const day = String(today.getDate()).padStart(2, '0');
-  
   const prayerTimesAPI = `https://api.myquran.com/v2/sholat/jadwal/${cityId}/${year}/${month}/${day}`;
-  const hijriArabicAPI = `https://api.aladhan.com/v1/gToH?date=${day}-${month}-${year}`;
   const hijriIndoAPI = `https://api.myquran.com/v2/cal/hijr/?adj=-1`;
-  
   try {
-    const [prayerResponse, hijriArResponse, hijriIdResponse] = await Promise.all([
+    const [prayerResponse, hijriIdResponse] = await Promise.all([
       fetch(prayerTimesAPI),
-      fetch(hijriArabicAPI),
       fetch(hijriIndoAPI)
     ]);
-
     const prayerData = await prayerResponse.json();
-    const hijriArApiData = await hijriArResponse.json();
     const hijriIdApiData = await hijriIdResponse.json();
-
     if (!prayerData.status) {
-      return new Response(JSON.stringify(prayerData, null, 2), {
-        status: 404, headers: { 'Content-Type': 'application/json' },
+      return new Response(JSON.stringify({ status: false, message: 'Jadwal untuk ID kota tersebut tidak ditemukan.' }, null, 2), {
+        status: 404, headers: { 'Content-Type': 'application/json; charset=utf-8' },
       });
     }
-
     const data = prayerData.data;
     const scheduleData = data.jadwal;
-    
-    let hijriAr = '';
     let hijriId = scheduleData.hijriah;
-
-    if (hijriArApiData.code === 200) {
-        const hijriInfo = hijriArApiData.data.hijri;
-        const dayArabic = toEasternArabicNumerals(hijriInfo.day);
-        const yearArabic = toEasternArabicNumerals(hijriInfo.year);
-        hijriAr = `${dayArabic} ${hijriInfo.month.ar} ${yearArabic} هـ`;
-    }
-
-    if (hijriIdApiData.status && hijriIdApiData.data && hijriIdApiData.data.date && hijriIdApiData.data.date.length > 1) {
+    if (hijriIdApiData.status && hijriIdApiData.data?.date?.length > 1) {
         hijriId = hijriIdApiData.data.date[1];
     }
-	
     const jsonResponse = {
       title: 'JADWAL SHOLAT',
       id: data.id,
       lokasi: data.lokasi,
       daerah: data.daerah,
       tanggal: scheduleData.tanggal,
-      hijri: {
-        ar: hijriAr,
-        id: hijriId,
-      },
+      hijri: hijriId,
       jadwal: {
         maghrib: scheduleData.maghrib,
         isya: scheduleData.isya,
@@ -131,15 +88,34 @@ async function handlePrayerSchedule(cityId) {
         ashar: 'https://cdn.jsdelivr.net/gh/chkdua/adzan-audio/ashar.mp3',
       },
     };
-
     return new Response(JSON.stringify(jsonResponse, null, 2), {
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json; charset=utf-8' },
     });
-
   } catch (error) {
     console.error('Error in handlePrayerSchedule:', error);
-    return new Response(JSON.stringify({ status: false, message: 'Gagal memproses permintaan.' }), {
-      status: 500, headers: { 'Content-Type': 'application/json' },
+    return new Response(JSON.stringify({ status: false, message: 'Gagal memproses permintaan jadwal.' }), {
+      status: 500, headers: { 'Content-Type': 'application/json; charset=utf-8' },
     });
   }
+}
+function showUsage() {
+  const usageData = {
+    message: "Selamat datang di API Jadwal Sholat",
+    endpoints: {
+      search_city: {
+        description: "Mencari ID kota berdasarkan nama.",
+        format: "/cari/{nama_kota}",
+        example: "/cari/jakarta"
+      },
+      prayer_schedule: {
+        description: "Mendapatkan jadwal sholat berdasarkan ID kota.",
+        format: "/jadwal/{id_kota}",
+        example: "/jadwal/1208",
+        default: "Jika ID kota tidak disediakan, akan menggunakan ID default untuk Jakarta (1208)."
+      }
+    }
+  };
+  return new Response(JSON.stringify(usageData, null, 2), {
+    headers: { 'Content-Type': 'application/json; charset=utf-8' },
+  });
 }
