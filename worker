@@ -3,19 +3,35 @@ export default {
     const url = new URL(request.url);
     const pathParts = url.pathname.split('/').filter(p => p); 
     const route = pathParts[0];
-    if (route === 'cari' && pathParts[1]) {
-      const cityName = pathParts[1];
-      return await handleCitySearch(cityName);
+    if (request.method === 'OPTIONS') {
+      return handleOptions(); // handle preflight
     }
-    else if (route === 'jadwal') {
-      const cityId = pathParts[1] || '1208';
-      return await handlePrayerSchedule(cityId);
-    } 
-    else {
+    if (route === 'cari' && pathParts[1]) {
+      return await handleCitySearch(pathParts[1]);
+    } else if (route === 'jadwal') {
+      return await handlePrayerSchedule(pathParts[1] || '1208');
+    } else {
       return showUsage();
     }
   },
 };
+
+// ✅ Tambah handler untuk preflight request
+function handleOptions() {
+  return new Response(null, {
+    status: 204,
+    headers: corsHeaders()
+  });
+}
+
+function corsHeaders() {
+  return {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type',
+    'Content-Type': 'application/json; charset=utf-8'
+  };
+}
 
 async function handleCitySearch(cityName) {
   const searchUrl = `https://api.myquran.com/v2/sholat/kota/cari/${encodeURIComponent(cityName)}`;
@@ -23,62 +39,57 @@ async function handleCitySearch(cityName) {
     const response = await fetch(searchUrl);
     const data = await response.json();
     if (!data.status || data.data.length === 0) {
-        return new Response(JSON.stringify({ status: false, message: 'Kota tidak ditemukan.' }), {
-            status: 404, headers: { 'Content-Type': 'application/json; charset=utf-8' },
-        });
+      return new Response(JSON.stringify({ status: false, message: 'Kota tidak ditemukan.' }), {
+        status: 404, headers: corsHeaders(),
+      });
     }
-    return new Response(JSON.stringify(data, null, 2), {
-      headers: { 'Content-Type': 'application/json; charset=utf-8' },
-    });
-  } catch (error) {
+    return new Response(JSON.stringify(data, null, 2), { headers: corsHeaders() });
+  } catch {
     return new Response(JSON.stringify({ status: false, message: 'Gagal menghubungi API pencarian kota.' }), {
-      status: 500, headers: { 'Content-Type': 'application/json; charset=utf-8' },
+      status: 500, headers: corsHeaders(),
     });
   }
 }
 
 async function handlePrayerSchedule(cityId) {
   const today = new Date();
-  const year = today.getFullYear();
-  const month = String(today.getMonth() + 1).padStart(2, '0');
-  const day = String(today.getDate()).padStart(2, '0');
-  const prayerTimesAPI = `https://api.myquran.com/v2/sholat/jadwal/${cityId}/${year}/${month}/${day}`;
-  const hijriIndoAPI = `https://api.myquran.com/v2/cal/hijr/?adj=-1`;
+  const y = today.getFullYear();
+  const m = String(today.getMonth() + 1).padStart(2, '0');
+  const d = String(today.getDate()).padStart(2, '0');
+  const prayerUrl = `https://api.myquran.com/v2/sholat/jadwal/${cityId}/${y}/${m}/${d}`;
+  const hijriUrl = `https://api.myquran.com/v2/cal/hijr/?adj=-1`;
+
   try {
-    const [prayerResponse, hijriIdResponse] = await Promise.all([
-      fetch(prayerTimesAPI),
-      fetch(hijriIndoAPI)
-    ]);
-    const prayerData = await prayerResponse.json();
-    const hijriIdApiData = await hijriIdResponse.json();
+    const [prayerRes, hijriRes] = await Promise.all([fetch(prayerUrl), fetch(hijriUrl)]);
+    const prayerData = await prayerRes.json();
+    const hijriData = await hijriRes.json();
+
     if (!prayerData.status) {
-      return new Response(JSON.stringify({ status: false, message: 'Jadwal untuk ID kota tersebut tidak ditemukan.' }, null, 2), {
-        status: 404, headers: { 'Content-Type': 'application/json; charset=utf-8' },
+      return new Response(JSON.stringify({ status: false, message: 'Jadwal tidak ditemukan.' }), {
+        status: 404, headers: corsHeaders(),
       });
     }
-    const data = prayerData.data;
-    const scheduleData = data.jadwal;
-    let hijriId = scheduleData.hijriah;
-    if (hijriIdApiData.status && hijriIdApiData.data?.date?.length > 1) {
-        hijriId = hijriIdApiData.data.date[1];
-    }
 
-    const jsonResponse = {
-      id: data.id, // ID sekarang ada di paling atas
+    const data = prayerData.data;
+    const schedule = data.jadwal;
+    const hijri = hijriData?.data?.date?.[1] || schedule.hijriah;
+
+    const json = {
+      id: data.id,
       title: 'JADWAL SHOLAT',
       lokasi: data.lokasi,
       daerah: data.daerah,
-      tanggal: scheduleData.tanggal,
-      hijri: hijriId,
+      tanggal: schedule.tanggal,
+      hijri,
       jadwal: {
-        maghrib: scheduleData.maghrib,
-        isya: scheduleData.isya,
-        imsak: scheduleData.imsak,
-        shubuh: scheduleData.subuh,
-        fajar: scheduleData.terbit,
-        dhuha: scheduleData.dhuha,
-        dzuhur: scheduleData.dzuhur,
-        ashar: scheduleData.ashar,
+        maghrib: schedule.maghrib,
+        isya: schedule.isya,
+        imsak: schedule.imsak,
+        shubuh: schedule.subuh,
+        fajar: schedule.terbit,
+        dhuha: schedule.dhuha,
+        dzuhur: schedule.dzuhur,
+        ashar: schedule.ashar,
       },
       audio: {
         maghrib: 'https://cdn.jsdelivr.net/gh/chkdua/adzan-audio/maghrib.mp3',
@@ -92,35 +103,20 @@ async function handlePrayerSchedule(cityId) {
       },
     };
 
-    return new Response(JSON.stringify(jsonResponse, null, 2), {
-      headers: { 'Content-Type': 'application/json; charset=utf-8' },
-    });
-  } catch (error) {
-    console.error('Error in handlePrayerSchedule:', error);
+    return new Response(JSON.stringify(json, null, 2), { headers: corsHeaders() });
+  } catch {
     return new Response(JSON.stringify({ status: false, message: 'Gagal memproses permintaan jadwal.' }), {
-      status: 500, headers: { 'Content-Type': 'application/json; charset=utf-8' },
+      status: 500, headers: corsHeaders(),
     });
   }
 }
 
 function showUsage() {
-  const usageData = {
+  return new Response(JSON.stringify({
     message: "Selamat datang di API Jadwal Sholat",
     endpoints: {
-      search_city: {
-        description: "Mencari ID kota berdasarkan nama.",
-        format: "/cari/{nama_kota}",
-        example: "/cari/jakarta"
-      },
-      prayer_schedule: {
-        description: "Mendapatkan jadwal sholat berdasarkan ID kota.",
-        format: "/jadwal/{id_kota}",
-        example: "/jadwal/1208",
-        default: "Jika ID kota tidak disediakan, akan menggunakan ID default untuk Jakarta (1208)."
-      }
+      search_city: "/cari/{nama_kota}",
+      prayer_schedule: "/jadwal/{id_kota}",
     }
-  };
-  return new Response(JSON.stringify(usageData, null, 2), {
-    headers: { 'Content-Type': 'application/json; charset=utf-8' },
-  });
+  }, null, 2), { headers: corsHeaders() });
 }
